@@ -23,7 +23,7 @@ var currentScope = scopeManager.acquire(ast);   // global scope
 
 //console.log(JSON.stringify(ast));
 var scopeChain = [];
-
+var currentScopeVariables=[];
 /*var result = estraverse.replace(ast, {
     enter: replace
 });*/
@@ -45,14 +45,28 @@ function replace(node) {
     }
 }
 
+var modifiedVariables=[];
 function enter(node, parent){
     currentScope = scopeManager.acquire(node);
     if(currentScope!=null) {
-        console.log(currentScope);
+        currentScopeVariables = currentScope.variables;
     }
+    var curBody = node.body;
+    modifiedVariables=[];
+    if(curBody!=undefined) {
+        estraverse.traverse(node, {
+            enter: travelBodyNode
+        });
+    }
+    for(x=0; x<modifiedVariables.length; x++){
+        var xx = "console.log('Changed Variable ["+modifiedVariables[x]+"] value ['+"+modifiedVariables[x]+"+']');";
+        node.body.body.unshift(esprima.parse(xx));
+    }
+
     if (createsNewScope(node)){
         scopeChain.push([]);
         var params = node.params;
+
         if(params!=undefined) {
             for (i = 0; i < params.length; i++) {
                 scopeChain[scopeChain.length - 1].push(params[i].name);
@@ -73,14 +87,20 @@ function enter(node, parent){
             if(index===scopeChain.length) currentScope.push(name);
             index++;
         }
+        var xx = "console.log('Variable assignment ["+node.left.name+"] value ['+"+node.left.name+"+']');";
+        //node.push(esprima.parse(xx));
+        return node;
+    }
+}
+function travelBodyNode(node, parent) {
+    if (node.type === util.astNodes.ASSIGNMENT_EXPRESSION){
+        modifiedVariables.push(node.left.name);
     }
 }
 
 function leave(node, parent){
     if (createsNewScope(node)){
         var currentScope = scopeChain.pop();
-        printScope(currentScope, node);
-
         var params = node.params;
         if(params!=undefined) {
             for (i = 0; i < params.length; i++) {
