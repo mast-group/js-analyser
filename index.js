@@ -8,7 +8,7 @@ var escodegen = require('escodegen');
 var escope = require('escope');
 var util = require('./lib/util');
 
-var filename = "test.js";  //process.argv[2];
+var filename = "/Users/Pankajan/Edinburgh/Research_Source/angular.js/src/apis.js";  //process.argv[2];
 var srcCode = fs.readFileSync(filename);
 
 var ast = esprima.parse(srcCode, {
@@ -24,23 +24,35 @@ var currentScope = scopeManager.acquire(ast);   // global scope
 //console.log(JSON.stringify(ast));
 var scopeChain = [];
 var currentScopeVariables=[];
-/*var result = estraverse.replace(ast, {
-    enter: replace
-});*/
+
 estraverse.traverse(ast, {
     enter: enter,
     leave: leave
 });
-var newCode = escodegen.generate(ast);
+
+var result = estraverse.replace(ast, {
+ leave: replace
+ });
+
+var newCode = escodegen.generate(result);
 console.log(newCode);
 
-function replace(node) {
-    if(node.type === util.astNodes.FUNCTION_DECLARATION ||
-        node.type === util.astNodes.FUNCTION_EXPRESSION ){
-        var params = node.params;
-        if(params!=undefined &&  node.body!=undefined && node.body.body!=undefined) {
-            node.body.body.unshift(esprima.parse('start()'));
-            return node;
+function replace(node, parent) {
+    if (node.type === util.astNodes.RETURN_STATEMENT){
+
+        if(parent.body==null) {
+            var tempVariable = esprima.parse(util.tempReturnVariable);
+            tempVariable.body[0].declarations[0].init=node.argument;
+            node.argument= util.returnTempVariable;
+
+            var xx = "console.log('Return Value ['+tempReturnVar+']');";
+            var newNode = util.returnTempBlock;
+            newNode.body[0] = tempVariable;
+            //newNode.body[1] = esprima.parse(xx);
+            newNode.body[1] = node;
+            return newNode;
+        } else {
+
         }
     }
 }
@@ -50,17 +62,6 @@ function enter(node, parent){
     currentScope = scopeManager.acquire(node);
     if(currentScope!=null) {
         currentScopeVariables = currentScope.variables;
-    }
-    var curBody = node.body;
-    modifiedVariables=[];
-    if(curBody!=undefined) {
-        estraverse.traverse(node, {
-            enter: travelBodyNode
-        });
-    }
-    for(x=0; x<modifiedVariables.length; x++){
-        var xx = "console.log('Changed Variable ["+modifiedVariables[x]+"] value ['+"+modifiedVariables[x]+"+']');";
-        node.body.body.unshift(esprima.parse(xx));
     }
 
     if (createsNewScope(node)){
@@ -75,8 +76,7 @@ function enter(node, parent){
             }
             return node;
         }
-    }
-    if (node.type === util.astNodes.VARIABLE_DECLARATOR){
+    } else if (node.type === util.astNodes.VARIABLE_DECLARATOR){
         scopeChain[scopeChain.length - 1].push(node.id.name);
     } else if (node.type === util.astNodes.ASSIGNMENT_EXPRESSION){
         var name = node.left.name;
@@ -87,9 +87,13 @@ function enter(node, parent){
             if(index===scopeChain.length) currentScope.push(name);
             index++;
         }
-        var xx = "console.log('Variable assignment ["+node.left.name+"] value ['+"+node.left.name+"+']');";
+        //var xx = "console.log('Variable assignment ["+node.left.name+"] value ['+"+node.left.name+"+']');";
         //node.push(esprima.parse(xx));
+        modifiedVariables.push(name);
+
         return node;
+    } else if (node.type === util.astNodes.EXPRESSION_STATEMENT) {
+        modifiedVariables=[];
     }
 }
 function travelBodyNode(node, parent) {
@@ -105,19 +109,38 @@ function leave(node, parent){
         if(params!=undefined) {
             for (i = 0; i < params.length; i++) {
                 scopeChain[scopeChain.length - 1].push(params[i].name);
-                var xx = "console.log('Method Parameter ["+params[i].name+"] value ['+"+params[i].name+"+']');";
+                var xx = "console.log('Method Parameter Method End ["+params[i].name+"] value ['+"+params[i].name+"+']');";
                 node.body.body.splice(node.body.body.length-1, 0, esprima.parse(xx));
             }
             return node;
         }
     } else if (node.type === util.astNodes.RETURN_STATEMENT){
-        var tempVariable = esprima.parse(util.tempReturnVariable);
-        tempVariable.body[0].declarations[0].init=node.argument;
-        node.argument= util.returnTempVariable;
-        var index = parent.body.length-1;
-        if(index<0) index = 0;
-        parent.body.splice(index, 0, tempVariable);
-        return node;
+
+        if (parent.body != null) {
+            var tempVariable = esprima.parse(util.tempReturnVariable);
+            tempVariable.body[0].declarations[0].init=node.argument;
+            node.argument= util.returnTempVariable;
+
+            var xx = "console.log('Return Value ['+tempReturnVar+']');";
+            var index = parent.body.length - 1;
+            if (index < 0) index = 0;
+            //parent.body.splice(index, 0, esprima.parse(xx));
+            parent.body.splice(index, 0, tempVariable);
+        }
+    } else if (node.type === util.astNodes.EXPRESSION_STATEMENT) {
+        if(parent.body!=undefined && parent.body!=null) {
+            var index=0;
+            for(x=0; x<parent.body.length; x++) {
+                if(parent.body[x].loc===node.loc) {
+                    index=x;
+                    break;
+                }
+            }
+            for (x = 0; x < modifiedVariables.length; x++) {
+                var xx = "console.log('Changed Variable [" + modifiedVariables[x] + "] value ['+" + modifiedVariables[x] + "+']');";
+                parent.body.splice(index+1, 0, esprima.parse(xx));
+            }
+        }
     }
 }
 
