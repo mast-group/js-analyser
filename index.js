@@ -1,44 +1,105 @@
 /**
  * Created by Pankajan on 08/12/2015.
  */
-var fs = require('fs');
+var fs = require('fs-extra');
 var esprima = require('esprima');
 var estraverse = require('estraverse');
 var escodegen = require('escodegen');
 var escope = require('escope');
 var util = require('./lib/util');
+var path = require('path');
 
-var filename = "/Users/Pankajan/Edinburgh/Research_Source/angular.js/src/apis.js";  //process.argv[2];
-var srcCode = fs.readFileSync(filename);
+//var filename = "/Users/Pankajan/Edinburgh/Research_Source/angular.js/src/apis.js";  //process.argv[2];
+var filename = "/afs/inf.ed.ac.uk/user/p/pchanthi/edinburgh/research_source/d3";  //process.argv[2];
+var outFilename = "/afs/inf.ed.ac.uk/user/p/pchanthi/edinburgh/research_source/instrumented-d3";  //process.argv[2];
+process(filename, outFilename);
+var count=0;
 
-var ast = esprima.parse(srcCode, {
-    loc: true,
-    range: true,
-    tokens: true,
-    comment: true
-});
-var scopeManager = escope.analyze(ast);
+function process(filename, outFilename) {
+    var stat = fs.lstatSync(filename);
+    if(stat.isDirectory()) {
+        if(filename.indexOf('node_modules')==-1) {
+            fs.mkdirSync(outFilename);
+            fs.readdir(filename, function (err, files) {
+                if (err) {
+                    fs.copy(filename, outFilename, {});
+                    return console.error(err);
+                }
+                files.forEach(function (file) {
+                    process(filename + "/" + file, outFilename + "/" + file);
+                });
+            });
+        } else {
+            fs.copy(filename, outFilename, {});
+        }
+    } else {
+        //console.log("Processing File : " + filename);
+        if(stat.isFile() && path.extname(filename)==='.js') {
+            try {
+                var newCode = instrument(filename);
+                fs.writeFile(outFilename, newCode, function (err) {
+                    if (err)fs.copy(filename, outFilename, {});
+                });
+            } catch (err) {
+                console.log(err);
+                fs.copy(filename, outFilename, {});
+            }
+        } else {
+            fs.copy(filename, outFilename, {});
+        }
+    }
+}
 
-var currentScope = scopeManager.acquire(ast);   // global scope
+var scopeManager;
+var scopeChain;
 
-//console.log(JSON.stringify(ast));
-var scopeChain = [];
-var currentScopeVariables=[];
+function instrument(filename) {
+    var srcCode = fs.readFileSync(filename, 'utf-8');
+    if (srcCode.charAt(0) === '#') { //shebang, 'comment' it out, won't affect syntax tree locations for things we care about
+        srcCode = '//' + srcCode;
+    }
+        var error = 'ESPRIMA PARSE';
+    var ast;
+    try{
+        ast = esprima.parse(srcCode, {
+            loc: true,
+            range: true,
+            tokens: true,
+            comment: true
+        });
+    } catch (notAScript) {
+        ast = esprima.parse(srcCode, {
+            loc: true,
+            range: true,
+            tokens: true,
+            comment: true,
+            sourceType: 'module'
+        });
+    }
+        error = 'ESCOPE ANALYSIS';
+        //scopeManager = escope.analyze(ast);
+        error = 'ESPRIMA ACQUIRE';
+        //var currentScope = scopeManager.acquire(ast);   // global scope
+        //console.log(JSON.stringify(ast));
+        scopeChain = [];
+        var currentScopeVariables = [];
+        error = 'ESTRAVERSE TRAVERSE';
+        estraverse.traverse(ast, {
+            enter: enter,
+            leave: leave
+        });
+        error = 'ESTRAVERSE REPLACE';
+        var result = estraverse.replace(ast, {
+            leave: replace
+        });
+        error = 'ESCODEGEN GENERATE';
+        var newCode = escodegen.generate(result);
+        return newCode;
+}
 
-estraverse.traverse(ast, {
-    enter: enter,
-    leave: leave
-});
-
-var result = estraverse.replace(ast, {
- leave: replace
- });
-
-var newCode = escodegen.generate(result);
-console.log(newCode);
 
 function replace(node, parent) {
-    if (node.type === util.astNodes.RETURN_STATEMENT){
+    /*if (node.type === util.astNodes.RETURN_STATEMENT){
 
         if(parent.body==null) {
             var tempVariable = esprima.parse(util.tempReturnVariable);
@@ -46,6 +107,7 @@ function replace(node, parent) {
             node.argument= util.returnTempVariable;
 
             var xx = "console.log('Return Value ['+tempReturnVar+']');";
+            xx="";
             var newNode = util.returnTempBlock;
             newNode.body[0] = tempVariable;
             //newNode.body[1] = esprima.parse(xx);
@@ -54,15 +116,16 @@ function replace(node, parent) {
         } else {
 
         }
-    }
+    }*/
 }
 
 var modifiedVariables=[];
+var calledMethods=[];
 function enter(node, parent){
-    currentScope = scopeManager.acquire(node);
-    if(currentScope!=null) {
-        currentScopeVariables = currentScope.variables;
-    }
+    //currentScope = scopeManager.acquire(node);
+    //if(currentScope!=null) {
+    //    currentScopeVariables = currentScope.variables;
+    //}
 
     if (createsNewScope(node)){
         scopeChain.push([]);
@@ -72,6 +135,7 @@ function enter(node, parent){
             for (i = 0; i < params.length; i++) {
                 scopeChain[scopeChain.length - 1].push(params[i].name);
                 var xx = "console.log('Method Parameter ["+params[i].name+"] value ['+"+params[i].name+"+']');";
+                xx="";
                 node.body.body.unshift(esprima.parse(xx));
             }
             return node;
@@ -92,8 +156,19 @@ function enter(node, parent){
         modifiedVariables.push(name);
 
         return node;
+    } else if (node.type === util.astNodes.UPDATE_EXPRESSION) {
+        //modifiedVariables.push(node.argument.name);
+    } else if (node.type === util.astNodes.CALL_EXPRESSION) {
+        if(node.callee.name!= undefined)
+            calledMethods.push(node.callee.name);
+        else {
+            //calledMethods.push(node.callee.property.name);
+
+        }
+
     } else if (node.type === util.astNodes.EXPRESSION_STATEMENT) {
         modifiedVariables=[];
+        calledMethods=[];
     }
 }
 function travelBodyNode(node, parent) {
@@ -108,13 +183,14 @@ function leave(node, parent){
         var params = node.params;
         if(params!=undefined) {
             for (i = 0; i < params.length; i++) {
-                scopeChain[scopeChain.length - 1].push(params[i].name);
+                //scopeChain[scopeChain.length - 1].push(params[i].name);
                 var xx = "console.log('Method Parameter Method End ["+params[i].name+"] value ['+"+params[i].name+"+']');";
+                xx="";
                 node.body.body.splice(node.body.body.length-1, 0, esprima.parse(xx));
             }
             return node;
         }
-    } else if (node.type === util.astNodes.RETURN_STATEMENT){
+    } /*else if (node.type === util.astNodes.RETURN_STATEMENT){
 
         if (parent.body != null) {
             var tempVariable = esprima.parse(util.tempReturnVariable);
@@ -122,12 +198,15 @@ function leave(node, parent){
             node.argument= util.returnTempVariable;
 
             var xx = "console.log('Return Value ['+tempReturnVar+']');";
+            xx="";
             var index = parent.body.length - 1;
             if (index < 0) index = 0;
             //parent.body.splice(index, 0, esprima.parse(xx));
-            parent.body.splice(index, 0, tempVariable);
+            if(parent.body instanceof Array) {
+                parent.body.splice(index, 0, tempVariable);
+            }
         }
-    } else if (node.type === util.astNodes.EXPRESSION_STATEMENT) {
+    } */else if (node.type === util.astNodes.EXPRESSION_STATEMENT) {
         if(parent.body!=undefined && parent.body!=null) {
             var index=0;
             for(x=0; x<parent.body.length; x++) {
@@ -136,12 +215,41 @@ function leave(node, parent){
                     break;
                 }
             }
+
+            var xx="";
             for (x = 0; x < modifiedVariables.length; x++) {
-                var xx = "console.log('Changed Variable [" + modifiedVariables[x] + "] value ['+" + modifiedVariables[x] + "+']');";
-                parent.body.splice(index+1, 0, esprima.parse(xx));
+                if(modifiedVariables[x]!== undefined) {
+                    var ii = 1;
+                    while(ii<=scopeChain.length) {
+                        if(scopeChain[scopeChain.length - ii].indexOf(modifiedVariables[x])>-1) break;
+                        ii++;
+                    }
+                    if(ii<=scopeChain.length) {
+                        xx += "...Changed Variable [" + modifiedVariables[x] + "] value ['+" + modifiedVariables[x] + "+']";
+                        //var xx = "console.log('Changed Variable [" + modifiedVariables[x] + "] value ['+" + modifiedVariables[x] + "+']');";
+                    }
+                }
+            }
+            if(xx!="") {
+                xx = "require('fs').appendFile('/afs/inf.ed.ac.uk/user/p/pchanthi/log.txt', '" + xx + "');";
+
+                if (parent.body instanceof Array) {
+                    parent.body.splice(index + 1, 0, esprima.parse(xx));
+                }
             }
         }
-    }
+
+            for (x = 0; x < calledMethods.length; x++) {
+                var xx = "console.log('Method called [" + calledMethods[x] + "]');";
+                xx="";
+                if(parent.body instanceof Array) {
+                    parent.body.splice(index + 1, 0, esprima.parse(xx));
+                }
+            }
+
+        modifiedVariables=[];
+        calledMethods=[];
+        }
 }
 
 function printScope(scope, node){
