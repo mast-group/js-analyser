@@ -10,15 +10,18 @@ var util = require('./lib/util');
 var path = require('path');
 
 //var filename = "/Users/Pankajan/Edinburgh/Research_Source/angular.js/src/apis.js";  //process.argv[2];
-var filename = "/afs/inf.ed.ac.uk/user/p/pchanthi/edinburgh/research_source/d3";  //process.argv[2];
-var outFilename = "/afs/inf.ed.ac.uk/user/p/pchanthi/edinburgh/research_source/instrumented-d3";  //process.argv[2];
+var filename = "/afs/inf.ed.ac.uk/user/p/pchanthi/edinburgh/research_source/express";  //process.argv[2];
+var outFilename = "/afs/inf.ed.ac.uk/user/p/pchanthi/edinburgh/research_source/instrumented-express";  //process.argv[2];
+
+var LOG_FILE = '/afs/inf.ed.ac.uk/user/p/pchanthi/log_express.txt';
+
 process(filename, outFilename);
 var count=0;
 
 function process(filename, outFilename) {
     var stat = fs.lstatSync(filename);
     if(stat.isDirectory()) {
-        if(filename.indexOf('node_modules')==-1) {
+        if(filename.indexOf('node_modules')==-1 && filename.indexOf('/test/')==-1) {
             fs.mkdirSync(outFilename);
             fs.readdir(filename, function (err, files) {
                 if (err) {
@@ -52,8 +55,10 @@ function process(filename, outFilename) {
 
 var scopeManager;
 var scopeChain;
+var currentScope;
 
 function instrument(filename) {
+
     var srcCode = fs.readFileSync(filename, 'utf-8');
     if (srcCode.charAt(0) === '#') { //shebang, 'comment' it out, won't affect syntax tree locations for things we care about
         srcCode = '//' + srcCode;
@@ -77,9 +82,9 @@ function instrument(filename) {
         });
     }
         error = 'ESCOPE ANALYSIS';
-        //scopeManager = escope.analyze(ast);
+        scopeManager = escope.analyze(ast);
         error = 'ESPRIMA ACQUIRE';
-        //var currentScope = scopeManager.acquire(ast);   // global scope
+        currentScope = scopeManager.acquire(ast);   // global scope
         //console.log(JSON.stringify(ast));
         scopeChain = [];
         var currentScopeVariables = [];
@@ -88,12 +93,8 @@ function instrument(filename) {
             enter: enter,
             leave: leave
         });
-        error = 'ESTRAVERSE REPLACE';
-        var result = estraverse.replace(ast, {
-            leave: replace
-        });
         error = 'ESCODEGEN GENERATE';
-        var newCode = escodegen.generate(result);
+        var newCode = escodegen.generate(ast);
         return newCode;
 }
 
@@ -107,31 +108,12 @@ function enter(node, parent){
     //}
 
     if (createsNewScope(node)){
+        currentScope = scopeManager.acquire(node);
         scopeChain.push([]);
-        var params = node.params;
-
-        if(params!=undefined) {
-            for (i = 0; i < params.length; i++) {
-                scopeChain[scopeChain.length - 1].push(params[i].name);
-                var xx = "console.log('Method Parameter ["+params[i].name+"] value ['+"+params[i].name+"+']');";
-                xx="";
-                node.body.body.unshift(esprima.parse(xx));
-            }
-            return node;
-        }
     } else if (node.type === util.astNodes.VARIABLE_DECLARATOR){
         scopeChain[scopeChain.length - 1].push(node.id.name);
     } else if (node.type === util.astNodes.ASSIGNMENT_EXPRESSION){
         var name = node.left.name;
-        var index = 1;
-        while(index<=scopeChain.length) {
-            var currentScope = scopeChain[scopeChain.length - index];
-            if(currentScope[name]!= undefined) break;
-            if(index===scopeChain.length) currentScope.push(name);
-            index++;
-        }
-        //var xx = "console.log('Variable assignment ["+node.left.name+"] value ['+"+node.left.name+"+']');";
-        //node.push(esprima.parse(xx));
         modifiedVariables.push(name);
 
         return node;
@@ -150,42 +132,11 @@ function enter(node, parent){
         calledMethods=[];
     }
 }
-function travelBodyNode(node, parent) {
-    if (node.type === util.astNodes.ASSIGNMENT_EXPRESSION){
-        modifiedVariables.push(node.left.name);
-    }
-}
 
 function leave(node, parent){
     if (createsNewScope(node)){
-        var currentScope = scopeChain.pop();
-        var params = node.params;
-        if(params!=undefined) {
-            for (i = 0; i < params.length; i++) {
-                //scopeChain[scopeChain.length - 1].push(params[i].name);
-                var xx = "console.log('Method Parameter Method End ["+params[i].name+"] value ['+"+params[i].name+"+']');";
-                xx="";
-                node.body.body.splice(node.body.body.length-1, 0, esprima.parse(xx));
-            }
-            return node;
-        }
-    } /*else if (node.type === util.astNodes.RETURN_STATEMENT){
 
-        if (parent.body != null) {
-            var tempVariable = esprima.parse(util.tempReturnVariable);
-            tempVariable.body[0].declarations[0].init=node.argument;
-            node.argument= util.returnTempVariable;
-
-            var xx = "console.log('Return Value ['+tempReturnVar+']');";
-            xx="";
-            var index = parent.body.length - 1;
-            if (index < 0) index = 0;
-            //parent.body.splice(index, 0, esprima.parse(xx));
-            if(parent.body instanceof Array) {
-                parent.body.splice(index, 0, tempVariable);
-            }
-        }
-    } */else if (node.type === util.astNodes.EXPRESSION_STATEMENT) {
+    } else if (node.type === util.astNodes.EXPRESSION_STATEMENT) {
         if(parent.body!=undefined && parent.body!=null) {
             var index=0;
             for(x=0; x<parent.body.length; x++) {
@@ -198,24 +149,38 @@ function leave(node, parent){
             var xx="";
             for (x = 0; x < modifiedVariables.length; x++) {
                 if(modifiedVariables[x]!== undefined) {
+                    if(modifiedVariables[x]==='touch') {
+                        console.log('t');
+                    }
                     var ii = 1;
                     while(ii<=scopeChain.length) {
                         if(scopeChain[scopeChain.length - ii].indexOf(modifiedVariables[x])>-1) break;
                         ii++;
                     }
                     if(ii<=scopeChain.length) {
-                        xx += "...Changed Variable [" + modifiedVariables[x] + "] value ['+" + modifiedVariables[x] + "+']";
-                        //var xx = "console.log('Changed Variable [" + modifiedVariables[x] + "] value ['+" + modifiedVariables[x] + "+']');";
+                        if(currentScope!=null) {
+                            var currentScopeVariables = currentScope.variables;
+                            var contains = false;
+                            for(i=0; i<currentScopeVariables.length; i++) {
+                                if(currentScopeVariables[i].name===modifiedVariables[x]){
+                                    contains = true;
+                                    break;
+                                }
+                            }
+                            if(contains) {
+                                xx = "if("+modifiedVariables[x]+") { require('fs').appendFile('"+LOG_FILE+"', '" + modifiedVariables[x] + "->'+" + modifiedVariables[x] + "+'\n');}";
+
+                                if (parent.body instanceof Array) {
+                                    parent.body.splice(index + 1, 0, esprima.parse(xx));
+                                }
+                            }
+
+                        }
+
                     }
                 }
             }
-            if(xx!="") {
-                xx = "require('fs').appendFile('/afs/inf.ed.ac.uk/user/p/pchanthi/log.txt', '" + xx + "');";
 
-                if (parent.body instanceof Array) {
-                    parent.body.splice(index + 1, 0, esprima.parse(xx));
-                }
-            }
         }
 
             for (x = 0; x < calledMethods.length; x++) {
@@ -238,12 +203,3 @@ function createsNewScope(node){
         node.type === util.astNodes.PROGRAM;
 }
 
-
-/*
-var globalScope = escope.analyze(ast).scopes[0];
-
-globalScope.implicit.variables.forEach(function(v) {
-    var id = v.identifiers[0];
-    console.warn('"' + id.name + '" used at line : ' + id.loc.start.line + ' was not declared');
-});
-*/
