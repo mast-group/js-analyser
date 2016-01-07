@@ -9,9 +9,14 @@ var escope = require('escope');
 var util = require('./lib/util');
 var path = require('path');
 
-//var filename = "/Users/Pankajan/Edinburgh/Research_Source/angular.js/src/apis.js";  //process.argv[2];
-var filename = "/afs/inf.ed.ac.uk/user/p/pchanthi/edinburgh/research_source/d3";  //process.argv[2];
-var outFilename = "/afs/inf.ed.ac.uk/user/p/pchanthi/edinburgh/research_source/instrumented-d3";  //process.argv[2];
+
+var LOG_FILE = '/Users/Pankajan/Edinburgh/log.txt';
+var filename = "/Users/Pankajan/Edinburgh/Research_Source/d3";  //process.argv[2];
+var outFilename = "/Users/Pankajan/Edinburgh/Research_Source/instrumented-d3";  //process.argv[2];
+
+
+// var filename = "/afs/inf.ed.ac.uk/user/p/pchanthi/edinburgh/research_source/d3";  //process.argv[2];
+//var outFilename = "/afs/inf.ed.ac.uk/user/p/pchanthi/edinburgh/research_source/instrumented-d3";  //process.argv[2];
 process(filename, outFilename);
 var count=0;
 
@@ -231,7 +236,7 @@ function leave(node, parent){
                 }
             }
             if(xx!="") {
-                xx = "require('fs').appendFile('/afs/inf.ed.ac.uk/user/p/pchanthi/log.txt', '" + xx + "');";
+                xx = "require('fs').appendFile('"+LOG_FILE+"', '" + xx + "');";
 
                 if (parent.body instanceof Array) {
                     parent.body.splice(index + 1, 0, esprima.parse(xx));

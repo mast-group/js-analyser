@@ -9,11 +9,18 @@ var escope = require('escope');
 var util = require('./lib/util');
 var path = require('path');
 
-//var filename = "/Users/Pankajan/Edinburgh/Research_Source/angular.js/src/apis.js";  //process.argv[2];
-var filename = "/afs/inf.ed.ac.uk/user/p/pchanthi/edinburgh/research_source/express";  //process.argv[2];
-var outFilename = "/afs/inf.ed.ac.uk/user/p/pchanthi/edinburgh/research_source/instrumented-express";  //process.argv[2];
+var PERSONAL_HOME = '/Users/Pankajan/';
+var OFFICE_HOME = '/afs/inf.ed.ac.uk/user/p/pchanthi/';
+var PERSONAL_LAP = PERSONAL_HOME + 'Edinburgh/Research_Source/';
+var OFFICE = OFFICE_HOME + 'edinburgh/research_source/';
 
-var LOG_FILE = '/afs/inf.ed.ac.uk/user/p/pchanthi/log_express.txt';
+var ROOT = PERSONAL_LAP;
+var HOME = PERSONAL_HOME;
+var PROJECT = 'd3';
+
+var filename = ROOT + PROJECT;  //process.argv[2];
+var outFilename = ROOT + "instrumented-" + PROJECT;  //process.argv[2];
+var LOG_FILE = HOME + 'log_' + PROJECT + '.txt';
 
 process(filename, outFilename);
 var count=0;
@@ -158,7 +165,13 @@ function leave(node, parent){
                         ii++;
                     }
                     if(ii<=scopeChain.length) {
-                        if(currentScope!=null) {
+                        xx = "if("+modifiedVariables[x]+") { require('fs').appendFile('"+LOG_FILE+"', '" + modifiedVariables[x] + "->'+" + modifiedVariables[x] + ");}";
+
+                        if (parent.body instanceof Array) {
+                            parent.body.splice(index + 1, 0, esprima.parse(xx));
+                        }
+
+                        /*if(currentScope!=null) {
                             var currentScopeVariables = currentScope.variables;
                             var contains = false;
                             for(i=0; i<currentScopeVariables.length; i++) {
@@ -167,15 +180,11 @@ function leave(node, parent){
                                     break;
                                 }
                             }
-                            if(contains) {
-                                xx = "if("+modifiedVariables[x]+") { require('fs').appendFile('"+LOG_FILE+"', '" + modifiedVariables[x] + "->'+" + modifiedVariables[x] + "+'\n');}";
+                            if(true) {
 
-                                if (parent.body instanceof Array) {
-                                    parent.body.splice(index + 1, 0, esprima.parse(xx));
-                                }
                             }
 
-                        }
+                        }*/
 
                     }
                 }
