@@ -104,7 +104,7 @@ function instrument(filename) {
 
 
 function replace(node, parent) {
-    /*if (node.type === util.astNodes.RETURN_STATEMENT){
+    if (node.type === util.astNodes.RETURN_STATEMENT){
 
         if(parent.body==null) {
             var tempVariable = esprima.parse(util.tempReturnVariable);
@@ -121,7 +121,7 @@ function replace(node, parent) {
         } else {
 
         }
-    }*/
+    }
 }
 
 var modifiedVariables=[];

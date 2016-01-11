@@ -10,12 +10,12 @@ var path = require('path');
 
 var PERSONAL_HOME = '/Users/Pankajan/';
 var OFFICE_HOME = '/afs/inf.ed.ac.uk/user/p/pchanthi/';
-var PERSONAL_LAP = PERSONAL_HOME + 'Edinburgh/Research_Source/';
+var PERSONAL = PERSONAL_HOME + 'Edinburgh/Research_Source/';
 var OFFICE = OFFICE_HOME + 'edinburgh/research_source/';
 
-var ROOT = OFFICE;
-var HOME = OFFICE_HOME;
-var PROJECT = 'd3';
+var ROOT = PERSONAL;
+var HOME = PERSONAL_HOME;
+var PROJECT = 'backbone';
 
 var filename = ROOT + PROJECT;  //process.argv[2];
 var outFilename = ROOT + "instrumented-" + PROJECT;  //process.argv[2];
@@ -26,7 +26,7 @@ process(filename, outFilename);
 function process(filename, outFilename) {
     var stat = fs.lstatSync(filename);
     if(stat.isDirectory()) {
-        if(filename.indexOf('node_modules')==-1 && filename.indexOf('/test/')==-1) {
+        if(filename.indexOf('node_modules')==-1 && filename.indexOf('/test')==-1) {
             fs.mkdirSync(outFilename);
             fs.readdir(filename, function (err, files) {
                 if (err) {
@@ -89,7 +89,7 @@ function instrument(filename) {
 function enter(node) {
     if (node.type === util.astNodes.FUNCTION_DECLARATION ||
         node.type === util.astNodes.FUNCTION_EXPRESSION){
-        var xx = "require('fs').appendFile('"+LOG_FILE+"', '" + currentFileName + "->'+" + node.range + ");";
+        var xx = "try { var instrument_fs = require('fs'); instrument_fs.appendFileSync('"+LOG_FILE+"', '..." + currentFileName + "->" + node.range + "');} catch (err){}";
         node.body.body.unshift(esprima.parse(xx));
         return node;
     }
