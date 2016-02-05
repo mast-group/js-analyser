@@ -13,20 +13,26 @@ var OFFICE_HOME = '/afs/inf.ed.ac.uk/user/p/pchanthi/';
 var PERSONAL = PERSONAL_HOME + 'Edinburgh/Research_Source/';
 var OFFICE = OFFICE_HOME + 'edinburgh/research_source/';
 
+var LESS = "less.js";
+var D3 = "d3";
+var EXPRESS = "express";
+var MOMENT = "moment";
+var METEOR = "meteor";
+
 var ROOT = PERSONAL;
 var HOME = PERSONAL_HOME;
-var PROJECT = 'd3';
+var PROJECT = "lodash";
 
-var filename = ROOT + PROJECT;  //process.argv[2];
-var outFilename = ROOT + "instrumented-" + PROJECT;  //process.argv[2];
-var LOG_FILE = HOME + 'log_' + PROJECT + '.txt';
+var filename = ROOT + "Original/" + PROJECT;  //process.argv[2];
+var outFilename = ROOT + "Instrumented/" + PROJECT;  //process.argv[2];
+var LOG_FILE = ROOT + "Result/" + 'log_' + PROJECT + '.txt';
 
 process(filename, outFilename);
 
 function process(filename, outFilename) {
     var stat = fs.lstatSync(filename);
     if(stat.isDirectory()) {
-        if(filename.indexOf('node_modules')==-1 && filename.indexOf('/test')==-1) {
+        if(filename.indexOf('node_modules')==-1 && filename.indexOf('/test')==-1 && filename.indexOf('__tests__')==-1) {
             fs.mkdirSync(outFilename);
             fs.readdir(filename, function (err, files) {
                 if (err) {
@@ -85,20 +91,36 @@ function instrument(filename) {
         leave: leave
     });
 
-    var result = estraverse.replace(ast, {
+   /* var result = estraverse.replace(ast, {
         leave: replace
-    });
+    });*/
 
-    return escodegen.generate(result);
+    return escodegen.generate(ast);
 }
 
 var scopeChain = [];
 var modifiedVariables=[];
 var calledMethods=[];
 
-function enter(node) {
+var methodName = [];
+
+function enter(node, parent) {
     if (createsNewScope(node)){
-        var xx = "try { var instrument_fs = require('fs'); instrument_fs.appendFileSync('"+LOG_FILE+"', '>>>" + currentFileName + "->" + node.range + "');} catch (err){}";
+        if(node.type === util.astNodes.FUNCTION_DECLARATION && node.id!== undefined && node.id.name != undefined) {
+            methodName.push(currentFileName + "->" + node.range + "->" + node.id.name);
+        } else if (node.type === util.astNodes.FUNCTION_EXPRESSION) {
+            if(parent.type == util.astNodes.ASSIGNMENT_EXPRESSION && parent.left !== undefined && parent.left.name !== undefined) {
+                methodName.push(currentFileName + "->" + node.range + "->" + parent.left.name);
+            } else if (parent.type == util.astNodes.VARIABLE_DECLARATOR && parent.id !== undefined && parent.id.name !== undefined) {
+                methodName.push(currentFileName + "->" + node.range + "->" + parent.id.name);
+            } else {
+                methodName.push(currentFileName + "->" + node.range);
+            }
+        } else {
+            methodName.push(currentFileName + "->" + node.range);
+        }
+
+        var xx = "try { var instrument_fs = require('fs'); instrument_fs.appendFileSync('"+LOG_FILE+"', '>>>" + methodName[methodName.length-1] + "');} catch (err){}";
         if(node.body!=undefined && node.body.body != undefined && node.body.body instanceof Array)
         node.body.body.unshift(esprima.parse(xx));
         scopeChain.push([]);
@@ -133,6 +155,7 @@ function leave(node, parent){
     if (createsNewScope(node)){
         scopeChain.pop();
         var params = node.params;
+        methodName.pop();
     } else if (node.type === util.astNodes.EXPRESSION_STATEMENT) {
         if(parent.body!=undefined && parent.body!=null) {
             var index=0;
@@ -152,17 +175,22 @@ function leave(node, parent){
                         ii++;
                     }
                     if(ii<=scopeChain.length) {
-                        xx += "...Changed Variable [" + modifiedVariables[x] + "] value ['+" + modifiedVariables[x] + "+']";
+                        if(methodName.length == 0) {
+                            console.log('Method name is undefined');
+                        }
+                        xx = "try { if(typeof " + modifiedVariables[x] + " == 'number') { var instrument_fs = require('fs'); instrument_fs.appendFileSync('"+LOG_FILE+"', '..." + methodName[methodName.length-1] + "-_-_-_-Changed Variable [" + modifiedVariables[x] + "] value ['+" + modifiedVariables[x] + "+']'); } } catch (err){}";
+
+                        if (parent.body instanceof Array) {
+                            parent.body.splice(index + 1, 0, esprima.parse(xx));
+                        }
+
+                        xx += "";
                         //var xx = "console.log('Changed Variable [" + modifiedVariables[x] + "] value ['+" + modifiedVariables[x] + "+']');";
                     }
                 }
             }
             if(xx!="") {
-                xx = "try { var instrument_fs = require('fs'); instrument_fs.appendFileSync('"+LOG_FILE+"', '" + xx + "'); } catch (err){}";
 
-                if (parent.body instanceof Array) {
-                    parent.body.splice(index + 1, 0, esprima.parse(xx));
-                }
             }
         }
 
@@ -173,7 +201,7 @@ function leave(node, parent){
 
 function replace(node, parent) {
     if (node.type === util.astNodes.RETURN_STATEMENT){
-
+/*
         if(parent.body==null) {
             var tempVariable = esprima.parse(util.tempReturnVariable);
             tempVariable.body[0].declarations[0].init=node.argument;
@@ -188,7 +216,7 @@ function replace(node, parent) {
             return newNode;
         } else {
 
-        }
+        }*/
     }
 }
 

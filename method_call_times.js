@@ -15,7 +15,7 @@ var OFFICE = OFFICE_HOME + 'edinburgh/research_source/';
 
 var ROOT = PERSONAL;
 var HOME = PERSONAL_HOME;
-var PROJECT = 'backbone';
+var PROJECT = 'd3';
 
 var filename = ROOT + PROJECT;  //process.argv[2];
 var outFilename = ROOT + "instrumented-" + PROJECT;  //process.argv[2];
@@ -68,12 +68,14 @@ function instrument(filename) {
     var ast;
     try{
         ast = esprima.parse(srcCode, {
+            loc:true,
             range: true,
             tokens: true,
             comment: true
         });
     } catch (notAScript) {
         ast = esprima.parse(srcCode, {
+            loc:true,
             range: true,
             tokens: true,
             comment: true,
@@ -86,10 +88,20 @@ function instrument(filename) {
     return escodegen.generate(ast);
 }
 
-function enter(node) {
+function enter(node, parent) {
     if (node.type === util.astNodes.FUNCTION_DECLARATION ||
         node.type === util.astNodes.FUNCTION_EXPRESSION){
-        var xx = "try { var instrument_fs = require('fs'); instrument_fs.appendFileSync('"+LOG_FILE+"', '..." + currentFileName + "->" + node.range + "');} catch (err){}";
+        var methodName = '';
+        if(node.type === util.astNodes.FUNCTION_DECLARATION) {
+            methodName = node.id.name;
+        } else {
+            if(parent.id!=undefined && parent.id != null && parent.id.name!=undefined && parent.id.name != null)
+                methodName = parent.id.name;
+            else if(parent.left!=undefined && parent.left != null && parent.left.name!=undefined && parent.left.name != null)
+                methodName = parent.left.name;
+        }
+
+        var xx = "try { var instrument_fs = require('fs'); instrument_fs.appendFileSync('"+LOG_FILE+"', '..." + currentFileName + ":::" + methodName + "->" + JSON.stringify(node.loc) + "');} catch (err){}";
         node.body.body.unshift(esprima.parse(xx));
         return node;
     }
