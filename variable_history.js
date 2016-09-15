@@ -7,32 +7,37 @@ var estraverse = require('estraverse');
 var escodegen = require('escodegen');
 var util = require('./lib/util');
 var path = require('path');
+var crypto = require('crypto');
+var shortid = require('shortid');
 
-var PERSONAL_HOME = '/Users/Pankajan/';
-var OFFICE_HOME = '/afs/inf.ed.ac.uk/user/p/pchanthi/';
-var PERSONAL = PERSONAL_HOME + 'Edinburgh/Research_Source/';
-var OFFICE = OFFICE_HOME + 'edinburgh/research_source/';
+var LOG_FILE = ROOT + "Result/raw/" + 'log_' + PROJECT + '.txt';
+var METHOD_HASH_FILE = ROOT + "Result/raw/method_hash/" + PROJECT + '.txt';
 
-var LESS = "less.js";
-var D3 = "d3";
-var EXPRESS = "express";
-var MOMENT = "moment";
-var METEOR = "meteor";
+console.log('PROJECT : ' + PROJECT);
 
-var ROOT = PERSONAL;
-var HOME = PERSONAL_HOME;
-var PROJECT = "lodash";
+fs.unlinkSync(METHOD_HASH_FILE);
 
-var filename = ROOT + "Original/" + PROJECT;  //process.argv[2];
-var outFilename = ROOT + "Instrumented/" + PROJECT;  //process.argv[2];
-var LOG_FILE = ROOT + "Result/" + 'log_' + PROJECT + '.txt';
+if (!module.parent) {
+    // this is the main module
+    var args = process.argv.slice(2);
+    if(args.length<2) {
+        console.log('Usage: <projectPath> <instrumentedProjectOutputPath> ' +
+            '[OPTIONAL - LogFilePath (Default:instrumentedProjectOutputPath/log.txt) ]' +
+            '[OPTIONAL - MethodHashFilePath (Default:instrumentedProjectOutputPath/methodHash.txt) ]');
+    } else {
+        process(args[0], args[1]);
+    }
+}
 
-process(filename, outFilename);
+
+
+
 
 function process(filename, outFilename) {
     var stat = fs.lstatSync(filename);
     if(stat.isDirectory()) {
-        if(filename.indexOf('node_modules')==-1 && filename.indexOf('/test')==-1 && filename.indexOf('__tests__')==-1) {
+        //filename.indexOf('node_modules')==-1 &&
+        if(filename.indexOf('/test')==-1 && filename.indexOf('__tests__')==-1) {
             fs.mkdirSync(outFilename);
             fs.readdir(filename, function (err, files) {
                 if (err) {
@@ -66,6 +71,9 @@ function process(filename, outFilename) {
 var currentFileName;
 
 function instrument(filename) {
+    if(filename.endsWith('array.js')) {
+        console.log();
+    }
     currentFileName = filename;
     var srcCode = fs.readFileSync(filename, 'utf-8');
     if (srcCode.charAt(0) === '#') { //shebang, 'comment' it out, won't affect syntax tree locations for things we care about
@@ -86,16 +94,18 @@ function instrument(filename) {
             sourceType: 'module'
         });
     }
+    methodName = [];
     estraverse.traverse(ast, {
         enter: enter,
         leave: leave
     });
-
-   /* var result = estraverse.replace(ast, {
+    methodName = [];
+    var result = estraverse.replace(ast, {
+        enter:methodSave,
         leave: replace
-    });*/
+    });
 
-    return escodegen.generate(ast);
+    return escodegen.generate(result);
 }
 
 var scopeChain = [];
@@ -103,26 +113,24 @@ var modifiedVariables=[];
 var calledMethods=[];
 
 var methodName = [];
-
+var methodNameDict = [];
 function enter(node, parent) {
     if (createsNewScope(node)){
-        if(node.type === util.astNodes.FUNCTION_DECLARATION && node.id!== undefined && node.id.name != undefined) {
-            methodName.push(currentFileName + "->" + node.range + "->" + node.id.name);
-        } else if (node.type === util.astNodes.FUNCTION_EXPRESSION) {
-            if(parent.type == util.astNodes.ASSIGNMENT_EXPRESSION && parent.left !== undefined && parent.left.name !== undefined) {
-                methodName.push(currentFileName + "->" + node.range + "->" + parent.left.name);
-            } else if (parent.type == util.astNodes.VARIABLE_DECLARATOR && parent.id !== undefined && parent.id.name !== undefined) {
-                methodName.push(currentFileName + "->" + node.range + "->" + parent.id.name);
-            } else {
-                methodName.push(currentFileName + "->" + node.range);
-            }
-        } else {
-            methodName.push(currentFileName + "->" + node.range);
+        if(node.type===util.astNodes.PROGRAM) {
+            var declare_fs = "var instrument_fs = require('fs');";
+            node.body.unshift(esprima.parse(declare_fs).body[0]);
         }
+        var currentMethodName = getCurrentMethodName(node, parent);
 
-        var xx = "try { var instrument_fs = require('fs'); instrument_fs.appendFileSync('"+LOG_FILE+"', '>>>" + methodName[methodName.length-1] + "');} catch (err){}";
+        var fileHash = shortid.generate();
+        methodName.push(fileHash);
+
+        fs.appendFileSync(METHOD_HASH_FILE, currentMethodName + "->" + fileHash + "\n");
+        methodNameDict[currentMethodName] = fileHash;
+
+        var xx = "try { instrument_fs.appendFileSync('"+LOG_FILE+"', '>>" + fileHash + "');} catch (err){}";
         if(node.body!=undefined && node.body.body != undefined && node.body.body instanceof Array)
-        node.body.body.unshift(esprima.parse(xx));
+        node.body.body.unshift(esprima.parse(xx).body[0]);
         scopeChain.push([]);
         var params = node.params;
 
@@ -133,11 +141,12 @@ function enter(node, parent) {
         }
     } else if (node.type === util.astNodes.VARIABLE_DECLARATOR){
         scopeChain[scopeChain.length - 1].push(node.id.name);
+    } else if (node.type === util.astNodes.IDENTIFIER){
+        modifiedVariables.pushUnique(node.name);
     } else if (node.type === util.astNodes.ASSIGNMENT_EXPRESSION){
-        var name = node.left.name;
-        modifiedVariables.push(name);
+        modifiedVariables.pushUnique(escodegen.generate(node.left));
     } else if (node.type === util.astNodes.UPDATE_EXPRESSION) {
-        modifiedVariables.push(node.argument.name);
+        modifiedVariables.pushUnique(node.argument.name);
     } else if (node.type === util.astNodes.CALL_EXPRESSION) {
         if(node.callee.name!= undefined)
             calledMethods.push(node.callee.name);
@@ -168,8 +177,34 @@ function leave(node, parent){
 
             var xx="";
             for (x = 0; x < modifiedVariables.length; x++) {
-                if(modifiedVariables[x]!== undefined) {
-                    var ii = 1;
+                if(modifiedVariables[x]!== undefined && modifiedVariables[x]!=='instrument_fs' && modifiedVariables[x]!=='require') {
+                try {
+                    if(modifiedVariables[x]==="math['false']") {
+                        console.log();
+                    }
+//Original instrumentation of only the variable value
+//                    xx = "try { if(typeof " + modifiedVariables[x] + " == 'number') {instrument_fs.appendFileSync('" + LOG_FILE + "', \"..." + methodName[methodName.length - 1] + "-_{" + modifiedVariables[x] + "}->{\"+" + modifiedVariables[x] + "+\"}\"); } } catch (err){}";
+
+                    xx = "try { " +
+                        "if(typeof " + modifiedVariables[x] + " == 'number') {" +
+                        "instrument_fs.appendFileSync('" + LOG_FILE + "', \"..." + methodName[methodName.length - 1] + "-_{" + modifiedVariables[x] + "}->number{\"+" + modifiedVariables[x] + "+\"}\"); " +
+                        "} else if(typeof " + modifiedVariables[x] + " == 'string') {" +
+                        "instrument_fs.appendFileSync('" + LOG_FILE + "', \"..." + methodName[methodName.length - 1] + "-_{" + modifiedVariables[x] + "}->string{\"+" + modifiedVariables[x] + "+\"}\"); " +
+                        "} else if(typeof " + modifiedVariables[x] + " == 'boolean') {" +
+                        "instrument_fs.appendFileSync('" + LOG_FILE + "', \"..." + methodName[methodName.length - 1] + "-_{" + modifiedVariables[x] + "}->boolean{\"+" + modifiedVariables[x] + "+\"}\"); " +
+                        "} else if(typeof " + modifiedVariables[x] + " == 'object') {" +
+                        "instrument_fs.appendFileSync('" + LOG_FILE + "', \"..." + methodName[methodName.length - 1] + "-_{" + modifiedVariables[x] + "}->object{\"+JSON.stringify(" + modifiedVariables[x] + ")+\"}\"); " +
+                        "}" +
+                        "} catch (err){}";
+
+                    if (parent.body instanceof Array) {
+                        parent.body.splice(index + 1, 0, esprima.parse(xx).body[0]);
+                    }
+                } catch(err) {
+                    console.log(err);
+                }
+
+/*                    var ii = 1;
                     while(ii<=scopeChain.length) {
                         if(scopeChain[scopeChain.length - ii].indexOf(modifiedVariables[x])>-1) break;
                         ii++;
@@ -178,15 +213,15 @@ function leave(node, parent){
                         if(methodName.length == 0) {
                             console.log('Method name is undefined');
                         }
-                        xx = "try { if(typeof " + modifiedVariables[x] + " == 'number') { var instrument_fs = require('fs'); instrument_fs.appendFileSync('"+LOG_FILE+"', '..." + methodName[methodName.length-1] + "-_-_-_-Changed Variable [" + modifiedVariables[x] + "] value ['+" + modifiedVariables[x] + "+']'); } } catch (err){}";
+                        xx = "try { if(typeof " + modifiedVariables[x] + " == 'number') {instrument_fs.appendFileSync('"+LOG_FILE+"', '..." + methodName[methodName.length-1] + "-_[" + modifiedVariables[x] + "]->['+" + modifiedVariables[x] + "+']'); } } catch (err){}";
 
                         if (parent.body instanceof Array) {
-                            parent.body.splice(index + 1, 0, esprima.parse(xx));
+                            parent.body.splice(index + 1, 0, esprima.parse(xx).body[0]);
                         }
 
                         xx += "";
                         //var xx = "console.log('Changed Variable [" + modifiedVariables[x] + "] value ['+" + modifiedVariables[x] + "+']');";
-                    }
+                    }*/
                 }
             }
             if(xx!="") {
@@ -198,25 +233,35 @@ function leave(node, parent){
         calledMethods=[];
     }
 }
+function methodSave(node, parent) {
+    if (createsNewScope(node)) {
+        var currentMethodName;
+        currentMethodName = getCurrentMethodName(node, parent);
+        methodName.push(methodNameDict[currentMethodName]);
+        methodName.push(currentMethodName.substring(currentMethodName.lastIndexOf("/")));
+    }
+}
 
 function replace(node, parent) {
-    if (node.type === util.astNodes.RETURN_STATEMENT){
-/*
-        if(parent.body==null) {
-            var tempVariable = esprima.parse(util.tempReturnVariable);
-            tempVariable.body[0].declarations[0].init=node.argument;
-            node.argument= util.returnTempVariable;
+    if (createsNewScope(node)){
+        methodName.pop();
+    } else if (node.type === util.astNodes.RETURN_STATEMENT){
+        var tempVariable = esprima.parse(util.tempReturnVariable);
+        tempVariable.body[0].declarations[0].init=node.argument;
+        node.argument= util.returnTempVariable;
 
-            var xx = "console.log('Return Value ['+tempReturnVar+']');";
-            xx="";
-            var newNode = util.returnTempBlock;
-            newNode.body[0] = tempVariable;
-            //newNode.body[1] = esprima.parse(xx);
-            newNode.body[1] = node;
-            return newNode;
-        } else {
-
-        }*/
+        xx = "try { " +
+            "if(typeof tempReturnVar == 'number') {" +
+            "instrument_fs.appendFileSync('" + LOG_FILE + "', \"..." + methodName[methodName.length - 1] + "-_{return_number}->{\"+tempReturnVar+\"}\"); " +
+            "} else if(typeof tempReturnVar == 'string') {" +
+            "instrument_fs.appendFileSync('" + LOG_FILE + "', \"..." + methodName[methodName.length - 1] + "-_{return_string}->{\"+tempReturnVar+\"}\"); " +
+            "} else if(typeof tempReturnVar == 'boolean') {" +
+            "instrument_fs.appendFileSync('" + LOG_FILE + "', \"..." + methodName[methodName.length - 1] + "-_{return_boolean}->{\"+tempReturnVar+\"}\"); " +
+            "} else if(typeof tempReturnVar == 'object') {" +
+            "instrument_fs.appendFileSync('" + LOG_FILE + "', \"..." + methodName[methodName.length - 1] + "-_{return_object}->{\"+JSON.stringify(tempReturnVar)+\"}\"); " +
+            "} " +
+            "} catch (err){}";
+        return { type: 'BlockStatement', body: [tempVariable.body[0], esprima.parse(xx).body[0], node]};
     }
 }
 
@@ -226,4 +271,34 @@ function createsNewScope(node){
         node.type === util.astNodes.PROGRAM;
 }
 
+function getCurrentMethodName(node, parent) {
+    var currentMethodName = '';
+    if (node.type === util.astNodes.FUNCTION_DECLARATION && node.id !== undefined) {
+        currentMethodName = currentFileName + "->" + node.range + "->" + escodegen.generate(node.id);
+    } else if (node.type === util.astNodes.FUNCTION_EXPRESSION) {
+        if (parent.type == util.astNodes.ASSIGNMENT_EXPRESSION && parent.left !== undefined) {
+            currentMethodName = currentFileName + "->" + node.range + "->" + escodegen.generate(parent.left);
+        } else if (parent.type == util.astNodes.VARIABLE_DECLARATOR && parent.id !== undefined) {
+            currentMethodName = currentFileName + "->" + node.range + "->" + escodegen.generate(parent.id);
+        } else if (parent.type == util.astNodes.PROPERTY && parent.key !== undefined) {
+            currentMethodName = currentFileName + "->" + node.range + "->" + escodegen.generate(parent.key);
+        } else {
+            currentMethodName = currentFileName + "->" + node.range;
+        }
+    } else {
+        currentMethodName = currentFileName + "->" + node.range;
+    }
+    return currentMethodName;
+}
+
+
+
+Array.prototype.pushUnique = function (item){
+    if(this.indexOf(item) == -1) {
+        //if(jQuery.inArray(item, this) == -1) {
+        this.push(item);
+        return true;
+    }
+    return false;
+}
 
