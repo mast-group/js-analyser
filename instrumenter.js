@@ -10,30 +10,25 @@ var path = require('path');
 var crypto = require('crypto');
 var shortid = require('shortid');
 
-var LOG_FILE = ROOT + "Result/raw/" + 'log_' + PROJECT + '.txt';
-var METHOD_HASH_FILE = ROOT + "Result/raw/method_hash/" + PROJECT + '.txt';
-
-console.log('PROJECT : ' + PROJECT);
-
-fs.unlinkSync(METHOD_HASH_FILE);
+var LOG_FILE;
+var METHOD_HASH_FILE;
 
 if (!module.parent) {
     // this is the main module
     var args = process.argv.slice(2);
     if(args.length<2) {
-        console.log('Usage: <projectPath> <instrumentedProjectOutputPath> ' +
+        console.log('Usage: <projectPath> <instrumentedProjectOutputFolder> ' +
             '[OPTIONAL - LogFilePath (Default:instrumentedProjectOutputPath/log.txt) ]' +
             '[OPTIONAL - MethodHashFilePath (Default:instrumentedProjectOutputPath/methodHash.txt) ]');
     } else {
-        process(args[0], args[1]);
+        var outputFile = path.join(args[1], path.parse(args[0]).base);
+        LOG_FILE = args.length === 3 ? args[2] : path.join(outputFile, 'log.txt');
+        METHOD_HASH_FILE = args.length === 4 ? args[3] : path.join(outputFile, 'methodHash.txt');
+        execute(args[0], outputFile);
     }
 }
 
-
-
-
-
-function process(filename, outFilename) {
+function execute(filename, outFilename) {
     var stat = fs.lstatSync(filename);
     if(stat.isDirectory()) {
         //filename.indexOf('node_modules')==-1 &&
@@ -45,7 +40,7 @@ function process(filename, outFilename) {
                     return console.error(err);
                 }
                 files.forEach(function (file) {
-                    process(filename + "/" + file, outFilename + "/" + file);
+                    execute(filename + "/" + file, outFilename + "/" + file);
                 });
             });
         } else {
