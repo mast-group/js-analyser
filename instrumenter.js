@@ -182,13 +182,13 @@ function leave(node, parent){
 
                     xx = "try { " +
                         "if(typeof " + modifiedVariables[x] + " == 'number') {" +
-                        "instrument_fs.appendFileSync('" + LOG_FILE + "', \"..." + methodName[methodName.length - 1] + "-_{" + modifiedVariables[x] + "}->number{\"+" + modifiedVariables[x] + "+\"}\"); " +
+                        "instrument_fs.appendFileSync('" + LOG_FILE + "', \"..." + methodName[methodName.length - 1] + "-_{" + modifiedVariables[x] + "}->{\"+" + modifiedVariables[x] + "+\"}\"); " +
                         "} else if(typeof " + modifiedVariables[x] + " == 'string') {" +
-                        "instrument_fs.appendFileSync('" + LOG_FILE + "', \"..." + methodName[methodName.length - 1] + "-_{" + modifiedVariables[x] + "}->string{\"+" + modifiedVariables[x] + "+\"}\"); " +
+                        "instrument_fs.appendFileSync('" + LOG_FILE + "', \"..." + methodName[methodName.length - 1] + "-_{" + modifiedVariables[x] + "}->{\"+" + modifiedVariables[x] + "+\"}\"); " +
                         "} else if(typeof " + modifiedVariables[x] + " == 'boolean') {" +
-                        "instrument_fs.appendFileSync('" + LOG_FILE + "', \"..." + methodName[methodName.length - 1] + "-_{" + modifiedVariables[x] + "}->boolean{\"+" + modifiedVariables[x] + "+\"}\"); " +
+                        "instrument_fs.appendFileSync('" + LOG_FILE + "', \"..." + methodName[methodName.length - 1] + "-_{" + modifiedVariables[x] + "}->{\"+" + modifiedVariables[x] + "+\"}\"); " +
                         "} else if(typeof " + modifiedVariables[x] + " == 'object') {" +
-                        "instrument_fs.appendFileSync('" + LOG_FILE + "', \"..." + methodName[methodName.length - 1] + "-_{" + modifiedVariables[x] + "}->object{\"+JSON.stringify(" + modifiedVariables[x] + ")+\"}\"); " +
+                        "instrument_fs.appendFileSync('" + LOG_FILE + "', \"..." + methodName[methodName.length - 1] + "-_{" + modifiedVariables[x] + "}->{\"+JSON.stringify(" + modifiedVariables[x] + ")+\"}\"); " +
                         "}" +
                         "} catch (err){}";
 
